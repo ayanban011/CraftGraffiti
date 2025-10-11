@@ -17,7 +17,6 @@ from infer_flux_ipa_siglip import resize_img, MLPProjModel, IPAdapter
 # SETUP
 # ----------------------------
 device = "cuda" if torch.cuda.is_available() else "cpu"
-login(token="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")
 
 # Paths for IP-Adapter and encoder
 IMAGE_ENCODER_PATH = "google/siglip-so400m-patch14-384"
