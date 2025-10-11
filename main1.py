@@ -1,0 +1,116 @@
+import os
+import random
+import torch
+from PIL import Image
+from tqdm import tqdm
+from diffusers import FluxPipeline
+from huggingface_hub import login
+import gc
+
+device = "cuda" if torch.cuda.is_available() else "cpu"
+login(token="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")
+
+def load_flux_pipeline(model_id="black-forest-labs/FLUX.1-dev"):
+    pipe = FluxPipeline.from_pretrained(
+        model_id,
+        torch_dtype=torch.bfloat16 if device == "cuda" else torch.float32,
+        safety_checker=None
+    ).to(device)
+    pipe.enable_attention_slicing()
+    pipe.enable_model_cpu_offload()
+    return pipe
+
+def load_lora_weights_flux(pipe, lora_path, strength=1.0):
+    if not os.path.exists(lora_path):
+        print(f"⚠️ LoRA file not found: {lora_path}")
+        return pipe
+    try:
+        pipe.unet.load_attn_procs(lora_path)
+        pipe.text_encoder.load_attn_procs(lora_path)
+    except Exception:
+        try:
+            pipe.load_lora_weights(lora_path)
+        except Exception as e2:
+            print("⚠️ Could not load LoRA:", e2)
+    if hasattr(pipe, "set_lora_strength"):
+        pipe.set_lora_strength(strength)
+    if hasattr(pipe, "fuse_lora"):
+        pipe.fuse_lora()
+    return pipe
+
+def stylize_image_flux(pipe, prompt, height, width, guidance_scale=7.5, steps=25, seed=None):
+    generator = torch.Generator(device)
+    if seed is None:
+        seed = random.randint(0, 2**31)
+    generator.manual_seed(seed)
+    return pipe(
+        prompt=prompt,
+        num_inference_steps=steps,
+        guidance_scale=guidance_scale,
+        height=height,
+        width=width,
+        generator=generator
+    ).images[0]
+
+def main():
+    input_dir = "/data/users/abanerjee/CraftGraffiti/input"
+    output_dir = "/data/users/abanerjee/CraftGraffiti/output"
+    os.makedirs(output_dir, exist_ok=True)
+
+    pipe = load_flux_pipeline("black-forest-labs/FLUX.1-dev")
+
+    # Load LoRAs
+    lora_dir = "/data/users/abanerjee/CraftGraffiti/lora_models"
+    loras = [
+        ("Rendered_Face_Detailer_FLUX.safetensors", 1.0),
+        ("Graffiti_Style.safetensors", 1.0),
+    ]
+    for name, strength in loras:
+        path = os.path.join(lora_dir, name)
+        pipe = load_lora_weights_flux(pipe, path, strength)
+
+    prompts = {
+       "dj": "artwork, vivid colors, graffiti, sharp detailed face, expressive eyes, frontal face, same person"
+    }
+
+    fotos = [
+        os.path.join(input_dir, f)
+        for f in os.listdir(input_dir)
+        if f.lower().endswith((".png", ".jpg", ".jpeg"))
+    ]
+
+    for foto in tqdm(fotos, colour="green", desc="Processing images"):
+        original = Image.open(foto).convert("RGB")
+        generated = {}
+
+        seed = random.randint(0, 2**31)
+
+        for name, prompt in prompts.items():
+            img = stylize_image_flux(
+                pipe,
+                prompt,
+                height=original.height,
+                width=original.width,
+                seed=seed
+            )
+            generated[name] = img
+
+        # Combine original + generated images
+        total_w = img.width#original.width + sum(img.width for img in generated.values())
+        combined = Image.new("RGB", (total_w, original.height))
+        x = 0
+        #combined.paste(original, (x, 0))
+        #x += original.width
+        for name in prompts.keys():
+            combined.paste(generated[name], (x, 0))
+            x += generated[name].width
+
+        out_name = os.path.basename(foto).rsplit(".", 1)[0] + "_DjGuitaristSinger.png"
+        combined.save(os.path.join(output_dir, out_name))
+
+        del original, generated, combined
+        torch.cuda.empty_cache()
+        gc.collect()
+
+if __name__ == "__main__":
+    main()
