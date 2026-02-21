@@ -14,7 +14,7 @@ Pytorch implementation of the paper [CraftGraffiti: Exploring Human Identity wit
 ### Step 1: Clone this repository and change the directory to the repository root
 ```bash
 git clone https://github.com/ayanban011/CraftGraffiti.git 
-cd GraphKD
+cd CraftGraffiti
 ```
 
 ### Step 2: Setup and activate the conda environment with required dependencies:
